@@ -2,6 +2,8 @@
 
 import asyncio
 import logging
+import os
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Optional
@@ -19,6 +21,10 @@ from ..session.store import SessionStore
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(stream=sys.stderr)
+
+BRAVE_PATH = os.environ.get("SUNO_BROWSER_PATH", "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser")
+BRAVE_PROFILE = Path.home() / ".suno-mcp" / "brave-profile"
+BRAVE_CDP_PORT = int(os.environ.get("SUNO_CDP_PORT", "9333"))
 
 
 class BrowserManager:
@@ -65,8 +71,11 @@ class BrowserManager:
             raise BrowserError(f"Browser initialization failed: {e}", "BROWSER_INIT_ERROR")
 
     async def _launch_browser(self, headless: bool) -> Browser:
-        """Launch Playwright's bundled Chromium browser."""
+        """Attach to real Brave over CDP (Google blocks automated Chromium login);
+        fall back to Playwright's bundled Chromium if Brave isn't installed."""
         assert self._playwright is not None
+        if Path(BRAVE_PATH).exists():
+            return await self._connect_brave()
         return await self._playwright.chromium.launch(
             headless=headless,
             args=[
@@ -76,9 +85,37 @@ class BrowserManager:
             ],
         )
 
+    async def _connect_brave(self) -> Browser:
+        """Start Brave with a dedicated profile + debug port (no automation flags), then attach."""
+        assert self._playwright is not None
+        cdp = f"http://127.0.0.1:{BRAVE_CDP_PORT}"
+        try:
+            return await self._playwright.chromium.connect_over_cdp(cdp)
+        except Exception:
+            pass  # not running yet
+        BRAVE_PROFILE.mkdir(parents=True, exist_ok=True)
+        subprocess.Popen(
+            [BRAVE_PATH, f"--user-data-dir={BRAVE_PROFILE}",
+             f"--remote-debugging-port={BRAVE_CDP_PORT}", "--no-first-run", "https://suno.com"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True,
+        )
+        for _ in range(30):
+            await asyncio.sleep(1)
+            try:
+                return await self._playwright.chromium.connect_over_cdp(cdp)
+            except Exception:
+                continue
+        raise BrowserError("Brave did not open its debug port", "BRAVE_CDP_ERROR")
+
     async def _create_context(self) -> BrowserContext:
         """Create a browser context, restoring saved session if available."""
         assert self._browser is not None
+        if self._browser.contexts:  # Brave over CDP: reuse its persistent profile
+            context = self._browser.contexts[0]
+            saved = self.session_store.load()  # e.g. cookies from brave_import
+            if saved and saved.get("cookies"):
+                await context.add_cookies(saved["cookies"])
+            return context
 
         ctx_kwargs: dict[str, Any] = {
             "viewport": {"width": 1280, "height": 900},
@@ -101,7 +138,7 @@ class BrowserManager:
             Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
             window.chrome = { runtime: {} };
             Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
-            Object.defineProperty(navigator, 'languages', {get: () => ['ko-KR', 'ko', 'en-US', 'en']});
+            Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
         """)
 
         context.on("page", self._on_new_page)
