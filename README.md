@@ -1,3 +1,5 @@
+> Standalone copy of [MeroZemory/suno-multi-mcp](https://github.com/MeroZemory/suno-multi-mcp) with my own changes. Original license and history retained.
+
 # Suno-MCP: Basic AI Music Generation
 
 ## ✅ **REALISTIC SCOPE: WORKING SUNO AI INTEGRATION**
