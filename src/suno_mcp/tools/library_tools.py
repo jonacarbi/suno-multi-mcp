@@ -70,6 +70,35 @@ _JS_FILL_BY_INDEX = """
 }
 """
 
+# JS: list recent clips via Suno's API (runs in the page, so it uses the session cookies).
+_JS_FETCH_CLIPS = r"""
+async (limit) => {
+    try {
+        // Suno's feed API wants the session JWT (the __session cookie) as a bearer token.
+        const tok = (document.cookie.match(/(?:^|; )__session=([^;]+)/) || [])[1];
+        if (!tok) return { source: 'no_session', clips: [] };
+        const r = await fetch('https://studio-api-prod.suno.com/api/feed/v3', {
+            method: 'POST',
+            headers: { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cursor: null, limit, filters: { disliked: 'False', trashed: 'False' } }),
+        });
+        if (r.ok) {
+            const data = await r.json();
+            return { source: 'api', clips: data.clips || [] };
+        }
+        return { source: 'api_error', status: r.status, clips: [] };
+    } catch(e) {
+        return { source: 'fetch_error', error: String(e), clips: [] };
+    }
+}
+"""
+
+
+async def clip_ids(page, limit: int = 20) -> Optional[list[str]]:
+    """Recent clip ids without navigating; None when the API is unreachable."""
+    result = await page.evaluate(_JS_FETCH_CLIPS, limit)
+    return [c["id"] for c in result["clips"]] if result.get("source") == "api" else None
+
 
 class LibraryTools:
     """Tools for browsing and interacting with the Suno AI library."""
@@ -83,27 +112,13 @@ class LibraryTools:
             components = await self.manager.ensure_browser()
             page = components["page"]
 
-            await navigate_to(page, "https://suno.com/me")
-            await asyncio.sleep(3)
+            # Polling must not navigate away from /create (it would drop a pending song form).
+            if not page.url.startswith("https://suno.com"):
+                await navigate_to(page, "https://suno.com/me")
+                await asyncio.sleep(3)
 
             # Try Suno internal API first (fetch runs in browser context with session cookies)
-            api_result = await page.evaluate("""
-async (limit) => {
-    try {
-        const r = await fetch(
-            `https://studio-api.suno.ai/api/gen/v2/?page=0&page_size=${limit}&is_liked=false`,
-            { credentials: 'include', headers: { 'Referer': 'https://suno.com/' } }
-        );
-        if (r.ok) {
-            const data = await r.json();
-            return { source: 'api', clips: data.clips || [] };
-        }
-        return { source: 'api_error', status: r.status, clips: [] };
-    } catch(e) {
-        return { source: 'fetch_error', error: String(e), clips: [] };
-    }
-}
-""", limit)
+            api_result = await page.evaluate(_JS_FETCH_CLIPS, limit)
 
             clips = api_result.get("clips", [])
             logger.info("library_list API source=%s clips=%d", api_result.get("source"), len(clips))
@@ -113,8 +128,9 @@ async (limit) => {
                     {
                         "id": c.get("id"),
                         "title": c.get("title") or c.get("display_name") or "Untitled",
+                        "type": (c.get("metadata") or {}).get("type"),  # "preview" = free 60s teaser, not downloadable
                         "style": (c.get("metadata") or {}).get("tags", ""),
-                        "duration": c.get("duration"),
+                        "duration": c.get("duration") or (c.get("metadata") or {}).get("duration"),
                         "created_at": c.get("created_at"),
                         "url": f"https://suno.com/song/{c.get('id')}",
                     }
@@ -122,8 +138,11 @@ async (limit) => {
                 ]
                 return f"Library ({len(tracks)} tracks):\n```json\n{json.dumps(tracks, ensure_ascii=False, indent=2)}\n```"
 
-            # Fallback: scrape song links from the page DOM
+            # Fallback: scrape song links from the library page DOM
             logger.info("API fallback — scraping song links from DOM")
+            if not page.url.startswith("https://suno.com/me"):
+                await navigate_to(page, "https://suno.com/me")
+                await asyncio.sleep(3)
             tracks = await page.evaluate("""
 (limit) => {
     const seen = new Set();

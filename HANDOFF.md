@@ -35,8 +35,8 @@ _Entry points, important modules, config, secrets location (not values)._
 
 - **Project:** `suno-multi-mcp`
 - **Branch:** `main`
-- **Last updated:** 2026-10-13 17:31:07 -03
-- **Built on commit:** a7bfeaa — chore: pin mcp below 2 and ignore graft cache (Jonathan Carbiere, 2026-10-13)
+- **Last updated:** 2026-10-13 17:31:08 -03
+- **Built on commit:** 3d2c3bc — feat(browser): import Suno session from Brave cookies (Jonathan Carbiere, 2026-10-13)
 - **README says:** **HONEST ASSESSMENT:** This is a **solid, working MCP server** for basic Suno AI music generation. No fake Studio automation - just reliable tools that actually work.
 
 ## How to build / run / test
@@ -64,18 +64,24 @@ _Entry points, important modules, config, secrets location (not values)._
 
 ## Languages
 
-- .py — 21 file(s)
+- .py — 24 file(s)
 - .md — 17 file(s)
 - .yaml — 1 file(s)
 - .toml — 1 file(s)
 
 ## Changes in this commit
 
-- M	src/suno_mcp/browser/manager.py
-- A	src/suno_mcp/session/brave_import.py
+- M	src/suno_mcp/server.py
+- M	src/suno_mcp/tools/download_tools.py
+- M	src/suno_mcp/tools/generate_tools.py
+- M	src/suno_mcp/tools/library_tools.py
+- A	src/suno_mcp/tools/song_tools.py
+- A	tests/test_generate_submit.py
+- A	tests/test_song_tools.py
 
 ## Recent history
 
+- 3d2c3bc feat(browser): import Suno session from Brave cookies _(Jonathan Carbiere, 2026-10-13)_
 - a7bfeaa chore: pin mcp below 2 and ignore graft cache _(Jonathan Carbiere, 2026-10-13)_
 - d1b3d7d fix(suno-mcp): generate_track - 워크스페이스 선택 강화 + title 파라미터 추가 _(Jio Kim, 2026-02-22)_
 

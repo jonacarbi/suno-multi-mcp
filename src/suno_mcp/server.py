@@ -15,6 +15,7 @@ from .tools.browser_tools import BrowserTools
 from .tools.download_tools import DownloadTools
 from .tools.generate_tools import GenerateTools
 from .tools.library_tools import LibraryTools
+from .tools.song_tools import SongTools
 
 # Configure logging to stderr (stdout is reserved for JSON-RPC)
 logging.basicConfig(
@@ -33,6 +34,7 @@ _auth = AuthTools(_manager)
 _generate = GenerateTools(_manager)
 _download = DownloadTools(_manager)
 _library = LibraryTools(_manager)
+_song = SongTools(_generate, _library, _download)
 
 # FastMCP app
 mcp = FastMCP("suno-mcp")
@@ -87,25 +89,45 @@ async def suno_generate_track(
 ) -> str:
     """Generate a new music track using Suno AI.
 
-    RULES (always follow):
-    1. Always specify `title` — makes the generated track identifiable in the library.
-    2. Always specify `duration` appropriate to the use case:
-       - "short" (~30s): stings, transitions, short loops
-       - "medium" (~60-90s): preparation screens, menus, short loops
-       - "long" (2-3min): battle themes, title screen, boss fights, cutscenes
-       - "auto": only when duration doesn't matter
-    3. NEVER call this tool again before confirming the previous two tracks
-       appeared in suno_library_list — calling too fast triggers CAPTCHA.
-    4. All tracks go to the "Just Game MCP" workspace automatically.
+    Prefer suno_create_song, which also waits for the clips and downloads them.
+    Suno may show a Cloudflare "Verify you are human" check in the Brave window;
+    the user must tick it (the tool waits up to 3 min). Always give a `title`.
 
     Args:
         prompt: Song Description — what the music should convey, mood, context
         style: Style of Music field — genre tags (e.g. "dark ambient, taiko drums, cinematic")
         lyrics: Custom lyrics (leave None for instrumental)
-        duration: Track length hint — "short" / "medium" / "long" / "auto"
+        duration: Ignored (Suno UI has no length control); trim afterwards instead
         title: Desired track title (shown in library — always specify this)
     """
     return await _generate.generate_track(prompt, style, lyrics, duration, title)
+
+
+@mcp.tool()
+async def suno_create_song(
+    prompt: str,
+    style: str,
+    title: str,
+    lyrics: Optional[str] = None,
+    download_path: str = "~/Music/Suno",
+    max_seconds: Optional[int] = None,
+    both_versions: bool = False,
+) -> str:
+    """One call: generate a song, wait for it, download it as mp3 (optionally trimmed).
+
+    Tell the user to tick Cloudflare's "Verify you are human" in the Brave window if it
+    appears. Takes ~2-6 min. Each download spends 1 of the Free plan's monthly downloads.
+
+    Args:
+        prompt: Song description — mood, subject, use case
+        style: Genre/style tags (e.g. "lo-fi, chill, piano")
+        title: Song title; also the output file name
+        lyrics: Custom lyrics (None = Suno writes them / instrumental per prompt)
+        download_path: Output folder (default ~/Music/Suno)
+        max_seconds: Trim the mp3 to this many seconds (None = full song)
+        both_versions: Download both clips Suno makes (spends 2 downloads)
+    """
+    return await _song.create_song(prompt, style, title, lyrics, download_path, max_seconds, both_versions)
 
 
 # ── Download tools ─────────────────────────────────────────────────────────────
@@ -113,7 +135,7 @@ async def suno_generate_track(
 @mcp.tool()
 async def suno_download_track(
     track_id: str,
-    download_path: str = "downloads/",
+    download_path: str = "~/Music/Suno",
     include_stems: bool = False,
 ) -> str:
     """Download a generated track from Suno AI by track ID.
